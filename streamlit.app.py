@@ -1,45 +1,57 @@
 # Import python packages
 import streamlit as st
-from snowflake.snowpark.context import get_active_session
-from snowflake.snowpark.functions import col, when_matched
+#from snowflake.snowpark.context import get_active_session
+from snowflake.snowpark.functions import col
 
-# App title
-st.title(":cup_with_straw: Pending Smoothie Orders! :cup_with_straw:")
-st.write("""Orders that need to be filled.""")
+# Write directly to the app
+st.title(":cup_with_straw: Customize Your Smoothie! :cup_with_straw:")
+st.write(
+    """Choose the fruits you want in your custom Smoothie!
+    """
+)
 
-# Filter for orders that are not yet filled
-session = get_active_session()
-my_dataframe = session.table("smoothies.public.orders").filter(col("ORDER_FILLED") == False).collect()
+# Input for the name on the order
+name_on_order = st.text_input('Name on Smoothie:')
+st.write('The name on your Smoothie will be:', name_on_order)
 
-if my_dataframe:
-    editable_df = st.experimental_data_editor(my_dataframe)
-    submitted = st.button('Submit')
-    if submitted:
+# Get the active Snowflake session
+cnx = st.connection("snowflake")
+session = cnx.session()
+#session = get_active_session()
 
-        og_dataset = session.table("smoothies.public.orders")
-        edited_dataset = session.create_dataframe(editable_df)
+# Retrieve available fruits from the Snowflake table
+my_dataframe = session.table("smoothies.public.fruit_options").select(col('FRUIT_NAME')).to_pandas()
 
+# Multiselect for choosing ingredients
+ingredients_list = st.multiselect(
+    'Choose up to 5 ingredients:',
+    options=my_dataframe['FRUIT_NAME'].tolist(),  # Convert column to a list for selection
+    max_selections=5
+)
+
+if ingredients_list:        
+    # Join selected fruits into a single string
+    ingredients_string = ', '.join(ingredients_list)
+
+    # Debugging statement (optional)
+    # st.write(f"Selected ingredients: {ingredients_string}")
+
+    # Construct the SQL INSERT statement
+    my_insert_stmt = f"""
+        INSERT INTO smoothies.public.orders (ingredients, name_on_order)
+        VALUES ('{ingredients_string}', '{name_on_order}')
+    """
+
+    # Debugging statement (optional)
+    # st.write(f"SQL Query: {my_insert_stmt}")
+
+    # Submit order button
+    time_to_insert = st.button('Submit Order')
+    
+    if time_to_insert:
         try:
-            og_dataset.merge(edited_dataset
-                     , (og_dataset['ORDER_UID'] == edited_dataset['ORDER_UID'])
-                     , [when_matched().update({'ORDER_FILLED': edited_dataset['ORDER_FILLED']})]
-                    )
-            st.success('Order(s) Updated!', icon = "👍")
-        except:
-            st.write('Something went wrong.')
-            
-else:
-    st.success('There are no pending orders right now', icon = "👍")
-    
-
-#st.write("""
- #   Below are the pending smoothie orders. 
-  #  You can mark them as filled using the checkboxes, but saving changes will be handled later.
-#""")
-
-
-    #st.success('Someone clicked the button', icon = '👍')
-    
-    #og_dataset = session.table("smoothies.public.orders")
-    #edited_dataset = session.create_dataframe(editable_df)
-    
+            # Execute the SQL query
+            session.sql(my_insert_stmt).collect()
+            st.success('Your Smoothie is ordered!', icon="✅")
+        except Exception as e:
+            st.error(f"Error occurred: {e}")
